@@ -1,7 +1,7 @@
 # TENTAKKL
 Taxonomic Extraction Normalization Transformation and Accounting for Kraken/bracKen fiLes
 
-![TENTAKKL logo](tentakkle_logo.png)
+![TENTAKKL logo](tentakkl_logo.png "TENTAKKL")
 
 Kraken and Bracken are highly-cited tools for classifying short read data and generating relative abundances. This tool reads standard bracken reports and performs a variety of operations.
 
