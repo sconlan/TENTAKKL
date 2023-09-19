@@ -11,7 +11,7 @@ use Data::Dumper;
 # Taxonomic Extraction Normalization Transformation and Accounting for Kraken/bracKen fiLes
 # S. Conlan (2023)
 
-my $version="0.1";
+my $version="0.2";
 
 #options
 my $opt = {config => 'minitax.config', comment=>'#', sep=>"\t", verbose=>1, outfmt=>"list", normalize=>"n", precision=>"4" };
