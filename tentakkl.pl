@@ -11,11 +11,13 @@ use Data::Dumper;
 # Taxonomic Extraction Normalization Transformation and Accounting for Kraken/bracKen fiLes
 # S. Conlan (2023)
 
+my $version="0.1";
+
 #options
 my $opt = {config => 'minitax.config', comment=>'#', sep=>"\t", verbose=>1, outfmt=>"list", normalize=>"n", precision=>"4" };
 if (-t STDIN && ! @ARGV){usage()};
-GetOptions ($opt, 'config=s', 'kraken=s@{1,}', 'bracken=s@{1,}', 'logfiles=s@{1,}', 'verbose=i', 'outfmt=s', 'normalize=s', 'addroot', 'out=s',
-            'precision=i','help');
+GetOptions ($opt, 'config=s', 'kraken=s@{1,}', 'bracken=s@{1,}', 'verbose=i', 'outfmt=s', 'normalize=s', 'add_lost', 'add_unclassified', 'out=s',
+            'precision=i','logfile=s','help');
 if ($opt->{help}){usage()};
 my $verbose=$opt->{'verbose'};
 my $ofh;
@@ -107,8 +109,9 @@ foreach my $f (@{$opt->{'bracken'}})
         die "FATAL: more than one level is populated\n";
       }
     my $rootdiff=0; #difference between root and assigned
-    if ($opt->{'addroot'})
+    if ($opt->{'add_lost'})
       {
+        $targ->{'root'}=0;
         $rootdiff=$root_totals{$sample}-$fcount{$sample};
         $counts{$sample}{'root'}+=$rootdiff;
         $fcount{$sample}+=$rootdiff;
@@ -127,21 +130,26 @@ if (exists($opt->{'kraken'})){$kdat=get_kraken($opt->{'kraken'})};
 foreach my $k (sort keys %root_totals)
   {
     if (!exists($kdat->{$k})){die "FATAL: $k is in bracken files but not paired kraken files, check names\n";next}
-    if (exists($dropped{$k})){$kdat->{$k}->{'root'}-=$dropped{$k}}; #we dropped reads, adjust those here
+    if (exists($dropped{$k})){$kdat->{$k}->{'root'}-=$dropped{$k}}; #if we dropped reads, adjust those here
 
     if ( (abs($root_totals{$k} - $kdat->{$k}->{'root'})/$root_totals{$k}) > 0.005 )
       {
         # because of bracken's Reads not distributed, the kraken classified won't exactly match bracken root
         # but if they differ by a lot that's an issue
-        die "FATAL: $k, bracken root and kraken classified differ by >0.5% : ".$root_totals{$k}.",".$kdat->{$k}->{'root'}."\n";
+        print STDERR "WARN: $k, bracken root and kraken classified differ by >0.5% : ".$root_totals{$k}.",".$kdat->{$k}->{'root'}."\n";
       }
-    #report those read and recover if requested...
+    #report those reads and recover if requested...
     my $rootdiff=0;
-    if ($opt->{'addroot'})
+    if ($opt->{'add_lost'})
       {
         $rootdiff=$kdat->{$k}->{'root'} - $root_totals{$k};
         $counts{$k}{'root'}+=$rootdiff;
         $fcount{$k}+=$rootdiff;
+      }
+    if ($opt->{'add_unclassified'})
+      {
+        $targ->{'unclassified'}="-1";
+        $counts{$k}{'unclassified'}=$kdat->{$k}->{'unclassified'};
       }
     print STDERR $k." lost some reads during redistribution: ".($kdat->{$k}->{'root'} - $root_totals{$k})." ($rootdiff assigned to root)\n" if ($verbose>0);
   }
@@ -151,7 +159,7 @@ foreach my $k (sort keys %root_totals)
 
 if ($opt->{'outfmt'} eq "list")
   {
-    print $ofh join($opt->{'sep'},"sample","order","taxon","count","fraction")."\n";
+    print $ofh join($opt->{'sep'},"sample","order","taxon","count","b_fraction","k_fraction")."\n";
     foreach my $s (@{$opt->{'bracken'}})
       {
         my $sample=sample_from_file($s);
@@ -160,9 +168,14 @@ if ($opt->{'outfmt'} eq "list")
             print $ofh join($opt->{'sep'},$sample,$targ->{$t},$t).$opt->{'sep'};
             if ( exists($counts{$sample}{$t}) )
               {
-                print $ofh join($opt->{'sep'},$counts{$sample}{$t},sprintf("%.".$opt->{'precision'}."f",($counts{$sample}{$t}/$fcount{$sample}) ) )."\n";
+                print $ofh join($opt->{'sep'},$counts{$sample}{$t},
+                                              sprintf("%.".$opt->{'precision'}."f",($counts{$sample}{$t}/$fcount{$sample}) ) );
+                if (exists($kdat->{$sample}))
+                  {print $ofh $opt->{'sep'}.sprintf("%.".$opt->{'precision'}."f",($counts{$sample}{$t}/($fcount{$sample} + $kdat->{$sample}->{'unclassified'})) )}
+                else {print $ofh $opt->{'sep'}."NA"};
+                print $ofh "\n";
               }
-            else {print $ofh join($opt->{'sep'},"0","0")."\n"};
+            else {print $ofh join($opt->{'sep'},"0","0","0")."\n"};
           }
       }
   }
@@ -181,6 +194,8 @@ elsif ($opt->{'outfmt'} eq "wide")
               {
                 if ($opt->{'normalize'} eq 'n'){print $ofh $opt->{'sep'}.$counts{$sample}{$t}};
                 if ($opt->{'normalize'} eq 'b'){print $ofh $opt->{'sep'}.sprintf("%.".$opt->{'precision'}."f",($counts{$sample}{$t}/$fcount{$sample}))};
+                if ($opt->{'normalize'} eq 'k'){print $ofh $opt->{'sep'}.sprintf("%.".$opt->{'precision'}."f",($counts{$sample}{$t}/($fcount{$sample} + $kdat->{$sample}->{'unclassified'})) )};
+
               }
             else {print $ofh $opt->{'sep'}."0"};
           }
@@ -189,21 +204,46 @@ elsif ($opt->{'outfmt'} eq "wide")
   }
 else {die "FATAL: unrecognized outfmt\n"};
 
+#########
+# log
+
+if ($opt->{'logfile'})
+  {
+    open(LOG,">$opt->{'logfile'}") or die "can't open log\n";
+    print LOG join($opt->{'sep'},"sample","k_root","k_unclass","b_root","b_assigned","b_dropped","b_lost")."\n";
+    foreach my $s (@{$opt->{'bracken'}})
+      {
+        my $sample=sample_from_file($s);
+        print LOG $sample;
+        if (exists($kdat->{$sample})){print LOG $opt->{'sep'}.$kdat->{$sample}->{'root'}} else {print LOG $opt->{'sep'}."NA"};
+        if (exists($kdat->{$sample})){print LOG $opt->{'sep'}.$kdat->{$sample}->{'unclassified'}} else {print LOG $opt->{'sep'}."NA"};
+        print LOG $opt->{'sep'}.$root_totals{$sample};
+        print LOG $opt->{'sep'}.$fcount{$sample};
+        if (exists($dropped{$sample})){print LOG $opt->{'sep'}.$dropped{$sample}} else {print LOG $opt->{'sep'}."NA"};
+        if ($opt->{'add_lost'}){print LOG $opt->{'sep'}.($kdat->{$sample}->{'root'} - $root_totals{$sample})} else {print LOG $opt->{'sep'}."NA"};
+        print LOG "\n";        
+      }
+    close(LOG);
+  }
 
 #########
 # SUB
 
 sub usage
   {
-    print STDERR "TENTAKKL\nTaxonomic Extraction Normalization Transformation and Accounting for Kraken/bracKen fiLes\n\n";
+    print STDERR "TENTAKKL v$version\nTaxonomic Extraction Normalization Transformation and Accounting for Kraken/bracKen fiLes\n\n";
     print STDERR "usage perl -w tentakkl.pl [options] -config minitax.cfg -bracken kraken_output/*_bracken.kreport\n\n";
     print STDERR "-config file       list of target taxa, text file, one taxon per line\n";
     print STDERR "                   preface taxon with '-' to have reads at that level removed. Child taxa unaffected\n";
     print STDERR "-bracken files     bracken-corrected kraken taxonomy reports\n";
+    print STDERR "-kraken files      [optional] kraken taxonomy reports, used to extract unclassified reads\n";
     print STDERR "-out file          output filename (STDOUT by default)\n";
-    print STDERR "-outfmt list|wide  list=tidy or wide=matrix; list has counts and normalized\n";
-    print STDERR "  -normalize n|b   (outfmt=wide) n=counts, b=normalize to 1\n";
-    print STDERR "-addroot           add reads lost during bracken read reassignment to root\n";
+    print STDERR "-outfmt list|wide  list=tidy or wide=matrix; list has counts and normalized; wide uses normalize option\n";
+    print STDERR "-normalize n|b|k   (outfmt=wide) n=counts\n";
+    print STDERR "                                 b=normalize to 1 using bracken total\n";
+    print STDERR "                                 k=normalize to 1 using kraken total (incl. unclassified)\n";
+    print STDERR "-add_lost          add reads lost during bracken read reassignment to a root taxon\n";
+    print STDERR "-add_unclassified  add unclassified reads category\n";
     print STDERR "-precision int     number of decimal places when normalizing\n";
     print STDERR "-verbose int       0=no info, 1=file-level info, 2=taxa-level info\n";
     exit(0);
