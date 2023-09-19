@@ -13,11 +13,11 @@ This tool reads standard bracken and kraken reports and performs a variety of op
 
 tentakkl:
 
-* Selects out target taxa to report
-* Allows the user to drop taxa from consideration
+* User selectable target taxa (reads are aggregated to parent taxonomic nodes)
+* User selectable taxa to remove from the report
 * Recovers reads lost by bracken (reported in STDOUT as "reads discarded" and "reads not distributed"
 * Recovers unclassified reads from the kraken2 reports
-* Supports output of raw counts, normalization to bracken (essentially classified reads) or kraken2 (essentially classified+unclassified)
+* Supports output of raw counts, normalization to bracken (~classified reads) or normalization to kraken2 (~classified+unclassified)
 * Supports list (tidy) and wide (Excel-compatible) outputs
  
 ```
