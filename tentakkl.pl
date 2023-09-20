@@ -11,7 +11,7 @@ use Data::Dumper;
 # Taxonomic Extraction Normalization Transformation and Accounting for Kraken/bracKen fiLes
 # S. Conlan (2023)
 
-my $version="0.2";
+my $version="0.3";
 
 #options
 my $opt = {config => 'minitax.config', comment=>'#', sep=>"\t", verbose=>1, outfmt=>"list", normalize=>"n", precision=>"4" };
@@ -33,10 +33,10 @@ my $lvlauto="NA"; #automatically detect bracken level
 # Load taxonomic targets from file
 my ($targ,$drop)=load_targets($opt->{config});
 
-my %counts;      #counts table
-my %fcount;      #total counts from file
-my %dropped;     #needed to adjust kraken counts later
-my %root_totals; #store value at root for checksum
+my %counts;      #counts table           - target counts and root, unclassified if requested
+my %fcount;      #total counts from file - functionally, this is the deminator for bracken noramlization
+my %dropped;     #reads in dropped taxa  - needed to adjust kraken counts later
+my %root_totals; #bracken counts at root - calculating lost reads
 
 foreach my $f (@{$opt->{'bracken'}})
   {
@@ -52,6 +52,29 @@ foreach my $f (@{$opt->{'bracken'}})
        chomp($newlin);
        my ($pct,$atbelow,$atlvl,$taxlvl,$taxid,$sciname)=split(/\t/,$newlin);
        $sciname=~s/^\s+//g; #strip off spaces, not reliable for computing on
+
+       #tracking what level taxonomic counts are at, should be just 1 for bracken
+       if ($atlvl>0){$lvlauto=$taxlvl;$atlvlsums{$taxlvl}+=$atlvl};
+
+       if ($sciname eq "root")
+         {
+           #initialize target stack
+           push(@lvl_stack,$taxlvl); # R
+           push(@name_stack,$sciname); # root
+           if ($atlvl>0){die "FATAL: root has atlvl counts\n"};
+           $root_totals{$sample}=$atbelow;
+           next;
+         }
+
+       while(is_less_or_equal($taxlvl,$lvl_stack[$#lvl_stack])==1)
+        {
+          #current taxonomic level is above (less) than current level
+          #pop targets until we get to a parent of the current level
+          my $q=pop(@lvl_stack);
+          $q=pop(@name_stack);
+        }
+
+       #drop taxa user requested dropped, keep track of those reads
        if (exists($drop->{$sciname}))
          {
            #taxon to drop
@@ -60,37 +83,10 @@ foreach my $f (@{$opt->{'bracken'}})
            print STDERR join("\t",$lvl_stack[$#lvl_stack],$name_stack[$#name_stack],"<-X-",$sciname,tax_to_num($taxlvl),$pct,$atbelow,$atlvl,$taxlvl,$taxid)."\n" if ($verbose>1);
            next;
          }
-       if ($atlvl>0){$lvlauto=$taxlvl;$atlvlsums{$taxlvl}+=$atlvl};
-
-       if ($sciname eq "root")
-         {
-           #initialize stack
-           push(@lvl_stack,$taxlvl);
-           push(@name_stack,$sciname);
-           if ($atlvl>0){die "FATAL: root has atlvl counts\n"};
-           $root_totals{$sample}=$atbelow;
-           next;
-         }
-
-       if ($taxlvl eq $lvl_stack[$#lvl_stack] && $sciname ne $name_stack[$#name_stack])
-        {
-          #found another taxon at the same level as current target
-          #pop stack until we get to the last target parent
-          my $q=pop(@lvl_stack);
-          $q=pop(@name_stack);
-        }
-
-       while(is_less($taxlvl,$lvl_stack[$#lvl_stack])==1)
-        {
-          #current taxonomic level is above (less) than current target
-          #pop targets until we get to a parent of the current level
-          my $q=pop(@lvl_stack);
-          $q=pop(@name_stack);
-        }
 
        if (exists($targ->{$sciname}))
          {
-           #if this is a target, append it to the stack
+           #if this is a user-requested target, append it to the stack
            push(@lvl_stack,$taxlvl);
            push(@name_stack,$sciname);
          }
@@ -102,12 +98,17 @@ foreach my $f (@{$opt->{'bracken'}})
      }
     close(INF);
 
+    #Error check, bracken should only have atlvl reads at 1 taxonomic level
     if (scalar(keys(%atlvlsums)) !=1)
       {
         #error checking, right now we expect bracken files that only have counts at one taxonomic level
         print STDERR Dumper(\%atlvlsums);
         die "FATAL: more than one level is populated\n";
       }
+
+    # If requested, this adds the difference between what bracken reports at root
+    # and the sum of the reads at the bracken assignment level, fcount (e.g., S)
+    # add to root and increase the fcount sum (since we are now counting them)
     my $rootdiff=0; #difference between root and assigned
     if ($opt->{'add_lost'})
       {
@@ -124,9 +125,12 @@ foreach my $f (@{$opt->{'bracken'}})
 # if raw kraken files are supplied, grab unclassified reads
 
 my $kdat;
-if (exists($opt->{'kraken'})){$kdat=get_kraken($opt->{'kraken'})};
+if (exists($opt->{'kraken'})){$kdat=get_kraken($opt->{'kraken'})}
+elsif (exists($opt->{'add_unclassified'})){die "FATAL: user requested unclassified reads but didn't supply kraken files\n"};
 
-# validate kraken data...
+# validate kraken data and add reads if requested. kraken reports can supply
+# 1. reads bracken dropped (e.g., Reads not distributed)
+# 2. unclassified reads
 foreach my $k (sort keys %root_totals)
   {
     if (!exists($kdat->{$k})){die "FATAL: $k is in bracken files but not paired kraken files, check names\n";next}
@@ -146,12 +150,12 @@ foreach my $k (sort keys %root_totals)
         $counts{$k}{'root'}+=$rootdiff;
         $fcount{$k}+=$rootdiff;
       }
+    print STDERR $k." lost some reads during redistribution: ".($kdat->{$k}->{'root'} - $root_totals{$k})." ($rootdiff assigned to root)\n" if ($verbose>0);
     if ($opt->{'add_unclassified'})
       {
         $targ->{'unclassified'}="-1";
         $counts{$k}{'unclassified'}=$kdat->{$k}->{'unclassified'};
       }
-    print STDERR $k." lost some reads during redistribution: ".($kdat->{$k}->{'root'} - $root_totals{$k})." ($rootdiff assigned to root)\n" if ($verbose>0);
   }
 
 ##########
@@ -159,6 +163,7 @@ foreach my $k (sort keys %root_totals)
 
 if ($opt->{'outfmt'} eq "list")
   {
+    #tidy list format
     print $ofh join($opt->{'sep'},"sample","order","taxon","count","b_fraction","k_fraction")."\n";
     foreach my $s (@{$opt->{'bracken'}})
       {
@@ -168,8 +173,10 @@ if ($opt->{'outfmt'} eq "list")
             print $ofh join($opt->{'sep'},$sample,$targ->{$t},$t).$opt->{'sep'};
             if ( exists($counts{$sample}{$t}) )
               {
+                #counts and bracken normalized
                 print $ofh join($opt->{'sep'},$counts{$sample}{$t},
                                               sprintf("%.".$opt->{'precision'}."f",($counts{$sample}{$t}/$fcount{$sample}) ) );
+                #if kraken data supplied, report kraken normalized
                 if (exists($kdat->{$sample}))
                   {print $ofh $opt->{'sep'}.sprintf("%.".$opt->{'precision'}."f",($counts{$sample}{$t}/($fcount{$sample} + $kdat->{$sample}->{'unclassified'})) )}
                 else {print $ofh $opt->{'sep'}."NA"};
@@ -181,6 +188,7 @@ if ($opt->{'outfmt'} eq "list")
   }
 elsif ($opt->{'outfmt'} eq "wide")
   {
+    #spreadsheet format
     foreach my $s (@{$opt->{'bracken'}}){print $ofh $opt->{'sep'}.sample_from_file($s)};
     print "\n";
 
@@ -195,7 +203,6 @@ elsif ($opt->{'outfmt'} eq "wide")
                 if ($opt->{'normalize'} eq 'n'){print $ofh $opt->{'sep'}.$counts{$sample}{$t}};
                 if ($opt->{'normalize'} eq 'b'){print $ofh $opt->{'sep'}.sprintf("%.".$opt->{'precision'}."f",($counts{$sample}{$t}/$fcount{$sample}))};
                 if ($opt->{'normalize'} eq 'k'){print $ofh $opt->{'sep'}.sprintf("%.".$opt->{'precision'}."f",($counts{$sample}{$t}/($fcount{$sample} + $kdat->{$sample}->{'unclassified'})) )};
-
               }
             else {print $ofh $opt->{'sep'}."0"};
           }
@@ -205,7 +212,7 @@ elsif ($opt->{'outfmt'} eq "wide")
 else {die "FATAL: unrecognized outfmt\n"};
 
 #########
-# log
+# log - TODO, finish this
 
 if ($opt->{'logfile'})
   {
@@ -245,18 +252,29 @@ sub usage
     print STDERR "-add_lost          add reads lost during bracken read reassignment to a root taxon\n";
     print STDERR "-add_unclassified  add unclassified reads category\n";
     print STDERR "-precision int     number of decimal places when normalizing\n";
+    print STDERR "-logfile file      write a logfile (still under development)\n";
     print STDERR "-verbose int       0=no info, 1=file-level info, 2=taxa-level info\n";
     exit(0);
   }
 
-sub is_less
+#sub is_less
+#  {
+#    #return 1 if first value is less than second
+#    #R<D<K<P<C<O<F<G<S
+#    #also S<S1<S2
+#    my %order=qw( R 1 D 2 K 3 P 4 C 5 O 6 F 7 G 8 S 9 );
+#    my ($v1,$v2)=@_;
+#    if (tax_to_num($v1)<tax_to_num($v2)){return(1)} else {return(0)};
+#  }
+
+sub is_less_or_equal
   {
     #return 1 if first value is less than second
     #R<D<K<P<C<O<F<G<S
     #also S<S1<S2
     my %order=qw( R 1 D 2 K 3 P 4 C 5 O 6 F 7 G 8 S 9 );
     my ($v1,$v2)=@_;
-    if (tax_to_num($v1)<tax_to_num($v2)){return(1)} else {return(0)};
+    if (tax_to_num($v1)<=tax_to_num($v2)){return(1)} else {return(0)};
   }
 
 sub tax_to_num
@@ -273,7 +291,7 @@ sub sample_from_file
     my $file=$_[0];
     $file=~s/^.+\///g; #remove path
     $file=~s/\..+$//g; #remove extensions
-    if ($file=~/^(met\d\d\d\d)/gi){return($1)}; #special case
+    if ($file=~/^([A-Z0-9]+)/gi){return($1)}; #special case of grabbing letters/numbers 
     return($file);
   }
 

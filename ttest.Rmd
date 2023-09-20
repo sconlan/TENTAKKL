@@ -1,0 +1,96 @@
+---
+title: 'TENTAKKL test'
+author: Sean Conlan
+output:
+  html_document:
+    toc: true
+    df_print: paged
+---
+
+# Introduction
+This R notebook displays a couple of bar charts based on list output from tentakkl 
+
+## Input
+
+* **test5.txt** - 20 samples, list output
+
+## Output
+
+* None
+
+# Setup
+## Paths
+```{r}
+project_path <- getwd()
+ttable <- "test5.txt"
+```
+
+## Load libraries
+```{r echo=FALSE}
+#load libraries
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, error = FALSE)
+knitr::opts_chunk$set(fig.width=12, fig.height=8)
+library(ggplot2); packageVersion("ggplot2")
+library(RColorBrewer); packageVersion("RColorBrewer")
+#library(readxl); packageVersion("readxl")
+library(reshape2); packageVersion("reshape2") #now a bit outdated, but how I learned to reshape data
+library(dplyr); packageVersion("dplyr")
+library(tidyverse); packageVersion("tidyverse")
+```
+
+## Load table
+```{r}
+dat<-read.table(file.path(project_path,ttable),sep="\t",header=T)
+#make sure taxa are ordered like in the file
+dat.tr<-dat %>%
+    mutate(taxon = fct_reorder(taxon, order))
+
+#these should be named, don't be lazy like me
+pal<-c("gray","black","antiquewhite3",brewer.pal(3, "RdPu"),brewer.pal(5, "Blues"),"green","Yellow",brewer.pal(6, "PuRd"),"gold",brewer.pal(3, "Purples"))
+```
+
+## Plot bracken normalized barplot
+
+In this plot, the total bracken reads are used as the denominator for normalization but we have also added the unclassified reads pulled from the matched kraken report. This results in a chart where we can visualize classified read relative abundances without losing a sense of the unclassified fraction.
+
+```{r fig.width=8,fig.height=6}
+p1 =  ggplot(dat.tr, aes(sample, b_fraction, fill=taxon)) +
+        geom_bar(stat="identity", position="stack") + 
+        ylab("Relative Abundance")+  xlab("Timepoint")  +
+        ggtitle("Relative abundance by Subject") +
+        #add_barplot_elements()  +
+        #scale_colour_manual(values=classic_palette) + 
+        scale_fill_manual(values=pal) +
+        theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+        guides(fill = guide_legend(ncol = 1)) +
+        theme(panel.background = element_rect(fill="darkgray")) +
+        theme(panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank())
+        #facet_grid(vars(site_specific), vars(subject_id),switch="y")
+        #facet_wrap(~subject_id+site_specific, ncol=12)
+
+p1
+```
+
+## Plot kraken normalized barplot
+
+In this plot, the total kracken reads are used as the denominator for normalization (classified+unclassified). As above, we have added the unclassified reads pulled from the matched kraken report. In this case, unclassified reads are shown as part of the relative abundances.
+
+```{r fig.width=8,fig.height=6}
+p2 =  ggplot(dat.tr, aes(sample, k_fraction, fill=taxon)) +
+        geom_bar(stat="identity", position="stack") + 
+        ylab("Relative Abundance")+  xlab("Timepoint")  +
+        ggtitle("Relative abundance by Subject") +
+        #add_barplot_elements()  +
+        #scale_colour_manual(values=classic_palette) + 
+        scale_fill_manual(values=pal) +
+        theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+        guides(fill = guide_legend(ncol = 1)) +
+        theme(panel.background = element_rect(fill="darkgray")) +
+        theme(panel.grid.major = element_blank(),
+              panel.grid.minor = element_blank())
+        #facet_grid(vars(site_specific), vars(subject_id),switch="y")
+        #facet_wrap(~subject_id+site_specific, ncol=12)
+
+p2
+```
