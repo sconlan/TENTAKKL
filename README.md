@@ -3,26 +3,28 @@ Taxonomic Extraction Normalization Transformation and Accounting for Kraken/brac
 
 ![TENTAKKL logo](tentakkl_logo.png "TENTAKKL")
 
-This is a pre-beta release. Probably not suitable for your purposes yet...
+## Introduction
 
-Kraken and Bracken are highly-cited tools for classifying short read data and generating relative abundances.
+This is a pre-beta release. It's probably not suitable for your purposes yet...
 
-This tool reads standard bracken and kraken reports and performs a variety of operations. Perhaps best described with a figure:
+kraken2 and bracken are highly-cited tools for classifying short read data and generating relative abundances.
+
+This tool reads bracken (and kraken) report files and performs a variety of operations.
 
 ![tentakkl purpose](tentakkl_purpose.png "tentakkl read accounting")
 
 tentakkl:
 
-* User selectable target taxa (reads are aggregated to parent taxonomic nodes)
-* User selectable taxa to remove from the report
-* Recovers reads lost by bracken (reported in STDOUT as "reads discarded" and "reads not distributed"
+* Supports user-selectable target taxa (reads are aggregated to parent taxonomic nodes)
+* Supports user-selectable taxa to remove from the report
+* Recovers reads lost by bracken (reported in STDOUT as "reads discarded" and "reads not distributed")
 * Recovers unclassified reads from the kraken2 reports
 * Supports output of raw counts, normalization to bracken (~classified reads) or normalization to kraken2 (~classified+unclassified)
 * Supports list (tidy) and wide (Excel-compatible) outputs
  
 ```
-14:20 biowulf minitax$ perl -w tentakkl.pl 
-TENTAKKL v0.1
+16:45 biowulf minitax$ perl -w tentakkl.pl 
+TENTAKKL v0.3
 Taxonomic Extraction Normalization Transformation and Accounting for Kraken/bracKen fiLes
 
 usage perl -w tentakkl.pl [options] -config minitax.cfg -bracken kraken_output/*_bracken.kreport
@@ -39,10 +41,11 @@ usage perl -w tentakkl.pl [options] -config minitax.cfg -bracken kraken_output/*
 -add_lost          add reads lost during bracken read reassignment to a root taxon
 -add_unclassified  add unclassified reads category
 -precision int     number of decimal places when normalizing
+-logfile file      write a logfile (still under development)
 -verbose int       0=no info, 1=file-level info, 2=taxa-level info
 ```
 
-# Quick Start
+## Quick Start
 
 This is an example taxonomic configuration file
 ```
