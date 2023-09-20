@@ -41,3 +41,45 @@ usage perl -w tentakkl.pl [options] -config minitax.cfg -bracken kraken_output/*
 -precision int     number of decimal places when normalizing
 -verbose int       0=no info, 1=file-level info, 2=taxa-level info
 ```
+
+# Quick Start
+
+This is an example taxonomic configuration file
+```
+15:05 biowulf minitax$ cat minitax.config  
+#hierarchical list of target taxa
+#indenting is for readability only
+#use a minus (-) to drop taxa (but not child taxa)
+
+Bacteria
+ Actinomycetota
+  Cutibacterium acnes
+  Corynebacterium tuberculostearicum
+ Bacillota
+  Staphylococcus aureus
+  Staphylococcus capitis
+  Staphylococcus epidermidis
+  Staphylococcus hominis
+ Pseudomonadota
+ Bacteroidota
+Eukaryota
+ Fungi
+  Malassezia globosa
+  Malassezia restricta
+  [Candida] auris
+  Homo sapiens
+Archaea
+Viruses
+ Human papillomavirus
+ Merkel cell polyomavirus
+```
+
+You might run tentakkl on a collection of bracken files like:
+```
+15:22 biowulf minitax$ perl -w tentakkl.pl -bracken kraken_output/*_bracken_species.kreport -kraken kraken_output/Met????.kreport -verbose 1 -config minitax.config -add_lost -add_unclassified -outfmt list > test5.txt
+```
+
+That list format file can be visualized in R
+
+
+
